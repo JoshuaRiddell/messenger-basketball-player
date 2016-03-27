@@ -140,7 +140,7 @@ pred_loc = [0, 0]
 
 # true when frames are recorded
 record = False
-video_out = cv.VideoWriter('.avi', VIDEO_ENCODER, VID_FPS, DIMENSIONS)
+video_out = None
 
 while(True):
     # quit if q is pressed
