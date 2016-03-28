@@ -3,9 +3,9 @@ import numpy as np
 import sys
 from math import acos, asin, cos, pi
 from time import sleep
-from os.path import join
 import serial
 import time
+import os
 
 
 # define thresholds
@@ -42,10 +42,14 @@ FREQUENCY = cv.getTickFrequency()
 # kernel for morphological operations performed on the binary images
 MORPH_KERNEL = np.ones((4, 4),np.uint8)
 
+# Port connection variables
 COM_PORT = "COM3"
 BAUD = 115200
 TIMEOUT = 0.1
 
+# Information about servos in the form,
+# [rest_point, scaling_factor (for accurate angles)]
+# Last one is for the pen servo in the form, [up, down]
 SERVO_CALIB = [
     [93, 0.8556],
     [80, 0.8556],
@@ -53,7 +57,36 @@ SERVO_CALIB = [
 ]
 
 LOG_VIDEO = True
-LOG_DIRECTORY = "D:\\basketball_logs"
+BASE_LOG_DIRECTORY = "D:\\basketball_logs"
+LOG_DATA_FILENAME = "log.csv"
+
+# log variables in the form, (heading, value). The input for the lambda function is vars()
+LOG_VARS = [
+    lambda x: time.time(),
+    lambda x: x["vel"][0],
+    lambda x: x["vel"][1],
+    lambda x: np.std(x["vel_ave"][0]),
+    lambda x: np.std(x["vel_ave"][1]),
+    lambda x: x["basket_coord"][0],
+    lambda x: x["basket_coord"][1],
+    lambda x: x["pred_loc"][0],
+    lambda x: x["pred_loc"][1],
+    lambda x: x["ball_coord"][0],
+    lambda x: x["ball_coord"][1],
+]
+LOG_VAR_HEADINGS = [
+    "time",
+    "vel_x",
+    "vel_y",
+    "vel_x_std",
+    "vel_y_std",
+    "basket_x",
+    "basket_y",
+    "predict_x",
+    "predict_y",
+    "ball_x",
+    "ball_y",
+]
 
 VIDEO_ENCODER = cv.VideoWriter_fourcc(*'XVID')
 VID_EXTENSION = ".avi"
@@ -65,6 +98,7 @@ def end():
     video_out.release()
     cv.destroyAllWindows()
     ser.close()
+    fd.close()
     sys.exit()
 
 def write_servo(ser_obj, pin, val):
@@ -142,6 +176,16 @@ pred_loc = [0, 0]
 record = False
 video_out = None
 
+# create a unique log directory
+log_directory = os.path.join(BASE_LOG_DIRECTORY, str(int(time.time())))
+os.mkdir(log_directory)
+
+# create data log file
+fd = open(os.path.join(log_directory, LOG_DATA_FILENAME), 'w')
+for heading in LOG_VAR_HEADINGS:
+    fd.write(heading + ",")
+fd.write("\n")
+
 while(True):
     # quit if q is pressed
     if cv.waitKey(1) & 0xFF == ord('q'):
@@ -204,10 +248,8 @@ while(True):
     # _ = cv.drawContours(contours_frame, contours[1], -1, (0,255,0), 3)
 
     if len(poi_coords) != 2:
-        print("lost")
         cv.imshow('points', frame)
         if record:
-            print("recording")
             video_out.write(original)
         # cv.imshow('contour', contours_frame)
         continue
@@ -264,7 +306,7 @@ while(True):
 
     # print(str(np.std(vel_ave)) + " " + str(ball_coord[1]) + " " + str(pred_loc[1]))
 
-    if pred_loc[0] < 310 and (np.average(vel_ave[1]) < 5 or (np.std(vel_ave[0]) < 30 and np.std(vel_ave[1]) < 45 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 20 and np.std(bounds_ave[0][1]) < 20 and np.std(bounds_ave[1][0]) < 20 and np.std(bounds_ave[1][1]) < 20)) and shot > 20:
+    if (np.average(vel_ave[1]) < 5 or (np.std(vel_ave[0]) < 30 and np.std(vel_ave[1]) < 45 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 20 and np.std(bounds_ave[0][1]) < 20 and np.std(bounds_ave[1][0]) < 20 and np.std(bounds_ave[1][1]) < 20)) and shot > 20:
         print("shoot {0}, {1}".format(ball_coord, pred_loc))
 
         m = (pred_loc[1] - ball_coord[1]) / float(pred_loc[0] - ball_coord[0])
@@ -290,10 +332,16 @@ while(True):
         send_move(HOME, absolute=True)
 
         # record logs
-        log_name = str(int(time.time()))
-        video_out.release()
-        video_out = cv.VideoWriter(join(LOG_DIRECTORY, log_name + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
+        vid_name = str(int(time.time()))
+        if video_out:
+            video_out.release()
+        video_out = cv.VideoWriter(os.path.join(log_directory, vid_name + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
         record = True
+
+        current_vars = vars()
+        for log_var in LOG_VARS:
+            fd.write(str(log_var(current_vars)) + ",")
+        fd.write("\n")
 
         shot = 0
 
