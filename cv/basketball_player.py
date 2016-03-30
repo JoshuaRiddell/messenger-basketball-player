@@ -11,30 +11,30 @@ import os
 # define thresholds
 BALL = {
     'thresh': [np.array([0, 45, 15]), np.array([21, 255, 255])],
-    'area': [20000, 25000],
-    'loc_x': [600, 900],
+    'area': [32000, 35000],
+    'loc_x': [750, 1100],
     }
 BASKET = {
-    'thresh': [np.array([0, 30, 83]), np.array([216, 255, 255])],
-    'area': [2015, 3914],
-    'loc_x': [150, 450],
+    'thresh': [np.array([0, 26, 81]), np.array([207, 255, 255])],
+    'area': [2500, 3300],
+    'loc_x': [0, 750],
     }
 
 BLOB_DATA = [BALL, BASKET]
 
 # crop bounds
-CROP = [[543, 257], [1413, 808]]
+CROP = [[385, 182], [1467, 867]]
 DIMENSIONS = (CROP[1][0] - CROP[0][0], CROP[1][1] - CROP[0][1])
 
 # blur kernel
 GAUS_KERNEL = np.ones((3, 3), np.float32)/15
 
 # robot home position
-HOME = [0, 55]
+HOME = [0, 65]
 
 # aim time for the shoot
 SHOOT_DELAY = 0.2
-INFER_DELAY = 1.50
+INFER_DELAY = 1.4
 
 # tick frequency (used for timing between frames to get velocities in px/sec)
 FREQUENCY = cv.getTickFrequency()
@@ -56,13 +56,20 @@ SERVO_CALIB = [
     [80, 20],
 ]
 
+# maximum pixel value the robot can safely reach to (higher is more restricted)
+MAX_PIX = 470
+
+# number of increments used for robot commands
+# higher number means more lag/slower speed, lower number means higher movement fidelity
+INCREMENTS = 20
+
 LOG_VIDEO = True
 BASE_LOG_DIRECTORY = "D:\\basketball_logs"
 LOG_DATA_FILENAME = "log.csv"
 
 # log variables in the form, (heading, value). The input for the lambda function is vars()
 LOG_VARS = [
-    lambda x: time.time(),
+    lambda x: x["current_time"],
     lambda x: x["vel"][0],
     lambda x: x["vel"][1],
     lambda x: np.std(x["vel_ave"][0]),
@@ -73,6 +80,8 @@ LOG_VARS = [
     lambda x: x["pred_loc"][1],
     lambda x: x["ball_coord"][0],
     lambda x: x["ball_coord"][1],
+    lambda x: x["m"],
+    lambda x: x["c"],
 ]
 LOG_VAR_HEADINGS = [
     "time",
@@ -86,6 +95,8 @@ LOG_VAR_HEADINGS = [
     "predict_y",
     "ball_x",
     "ball_y",
+    "shot_grad",
+    "shot_int",
 ]
 
 VIDEO_ENCODER = cv.VideoWriter_fourcc(*'XVID')
@@ -108,15 +119,15 @@ def write_servo(ser_obj, pin, val):
 def send_move(pixel_coord, absolute=False):
     if not absolute:
         coord = [0, 0]
-        coord[0] = 23.91 - 0.001115 * pixel_coord[0] - 0.1089 * pixel_coord[1]
-        coord[1] = 165 - 0.1177 * pixel_coord[0] - 0.006929 * pixel_coord[1]
+        coord[0] = 20.88 + 0.001015 * pixel_coord[0] - 0.07991 * pixel_coord[1]
+        coord[1] = 169.3 - 0.09383 * pixel_coord[0] - 0.01384 * pixel_coord[1]
     else:
         coord = pixel_coord
 
     theta = [0, 0]
 
     theta[1] = asin(coord[0] / float(42))
-    a = coord[1] - 42 * cos(theta[1])
+    a = coord[1] - 50 * cos(theta[1])
     theta[0] = asin((50 - a) / 38)
     theta[1] *= -1
 
@@ -129,10 +140,10 @@ def send_move(pixel_coord, absolute=False):
 
 def pen(activate):
     if activate:
-        write_servo(ser, 2, 22)
+        write_servo(ser, 2, 34)
         pass
     else:
-        write_servo(ser, 2, 80)
+        write_servo(ser, 2, 110)
         pass
     sleep(0.001)
 
@@ -218,7 +229,7 @@ while(True):
     # contours = []
     for i in range(len(binaries)):
         # filter noise
-        binaries[i] = cv.erode(binaries[i], MORPH_KERNEL, iterations=1)
+        binaries[i] = cv.erode(binaries[i], MORPH_KERNEL, iterations=2)
         binaries[i] = cv.dilate(binaries[i], MORPH_KERNEL, iterations=3)
 
         # find contours
@@ -283,7 +294,6 @@ while(True):
                     j = 1
                 bounds_ave[i][j] = np.concatenate(([basket_coord[i]], bounds_ave[i][j][:-1]))
                 bounds[i][j] = np.average(bounds_ave[i][j])
-                # print(bounds_ave)
 
     # detect if bounds have been reached
     for i in range(len(bounds)):
@@ -306,24 +316,21 @@ while(True):
 
     # print(str(np.std(vel_ave)) + " " + str(ball_coord[1]) + " " + str(pred_loc[1]))
 
-    if (np.average(vel_ave[1]) < 5 or (np.std(vel_ave[0]) < 30 and np.std(vel_ave[1]) < 45 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 20 and np.std(bounds_ave[0][1]) < 20 and np.std(bounds_ave[1][0]) < 20 and np.std(bounds_ave[1][1]) < 20)) and shot > 20:
+    if (np.average(vel_ave[1]) < 5 or (np.std(vel_ave[0]) < 30 and np.std(vel_ave[1]) < 50 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 20 and np.std(bounds_ave[0][1]) < 20 and np.std(bounds_ave[1][0]) < 20 and np.std(bounds_ave[1][1]) < 20)) and shot > 20:
         print("shoot {0}, {1}".format(ball_coord, pred_loc))
 
         m = (pred_loc[1] - ball_coord[1]) / float(pred_loc[0] - ball_coord[0])
         c = ball_coord[1] - m * ball_coord[0]
 
-        MAX_PIX = 340
-
-        increments = 20
-        time_step = SHOOT_DELAY / float(increments)
-        x_step = (MAX_PIX - ball_coord[0]) / float(increments)
+        time_step = SHOOT_DELAY / float(INCREMENTS)
+        x_step = (MAX_PIX - ball_coord[0]) / float(INCREMENTS)
         x = ball_coord[0]
 
         send_move(ball_coord)
         pen(1)
-        sleep(0.6)
-        for i in range(increments):
-            if i == int(increments * 0.60):
+        sleep(0.5)
+        for i in range(INCREMENTS):
+            if i == int(INCREMENTS * 0.60):
                 pen(0)
             send_move([x, m * x + c])
             x += x_step
@@ -332,10 +339,10 @@ while(True):
         send_move(HOME, absolute=True)
 
         # record logs
-        vid_name = str(int(time.time()))
+        current_time = str(int(time.time()))
         if video_out:
             video_out.release()
-        video_out = cv.VideoWriter(os.path.join(log_directory, vid_name + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
+        video_out = cv.VideoWriter(os.path.join(log_directory, current_time + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
         record = True
 
         current_vars = vars()
