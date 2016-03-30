@@ -5,7 +5,7 @@ from math import acos, asin, cos, pi
 from time import sleep
 import serial
 
-CROP = [[543, 257], [1413, 808]]
+CROP = [[385, 182], [1467, 867]]
 
 COM_PORT = "COM3"
 BAUD = 115200
@@ -19,11 +19,10 @@ def callback(event, x, y, flags, usr):
     if event == 3:
     	pen(2)
     if flags == 1:
-    	a = send_move([x,y])
-    	# print("pix_coord " + str((x, y)))
-    	# print("coord " + str(a))
+    	send_move([x,y])
     if event == 2:
-        print(str((x, y)) + " = " + str(send_move(last)))
+        new = send_move(last)
+        print(",".join([str(i) for i in x,y,new[0],new[1]]))
 
 def write_servo(ser_obj, pin, val):
     ser_obj.write(chr(pin))
@@ -48,15 +47,18 @@ def send_move(pixel_coord, absolute=False):
         # coord[0] = 25.1 - 6 * pixel_coord[1] / 55
         # coord[1] = 151.8 - 2 * pixel_coord[0] / 25
 
-        coord[0] = 23.91 - 0.001115 * pixel_coord[0] - 0.1089 * pixel_coord[1]
-        coord[1] = 165 - 0.1177 * pixel_coord[0] - 0.006929 * pixel_coord[1]
+        coord[0] = 20.88 + 0.001015 * pixel_coord[0] - 0.07991 * pixel_coord[1]
+        coord[1] = 169.3 - 0.09383 * pixel_coord[0] - 0.01384 * pixel_coord[1]
     else:
         coord = pixel_coord
+
+    if not current and not absolute:
+        return coord
 
     theta = [0, 0]
 
     theta[1] = asin(coord[0] / float(42))
-    a = coord[1] - 42 * cos(theta[1])
+    a = coord[1] - 50 * cos(theta[1])
     theta[0] = asin((50 - a) / 38)
     theta[1] *= -1
 
@@ -75,14 +77,14 @@ def pen(activate):
     if activate == 2:
         current = activate = not current
     if activate:
-        send_move(last)
-        sleep(0.1)
         write_servo(ser, 2, 50)
+        sleep(0.4)
+        send_move(last)
         sleep(0.2)
-        write_servo(ser, 2, 22)
+        write_servo(ser, 2, 34)
         pass
     else:
-        write_servo(ser, 2, 120)
+        write_servo(ser, 2, 110)
         send_move(HOME, absolute=True)
         pass
     sleep(0.001)
