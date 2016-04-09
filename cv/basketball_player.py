@@ -7,16 +7,18 @@ import serial
 import time
 import os
 
+LOG_VIDEO = False
+CAMERA_NUMBER = 0
 
 # define thresholds
 BALL = {
     'thresh': [np.array([0, 45, 15]), np.array([21, 255, 255])],
-    'area': [32000, 35000],
+    'area': [30000, 39000],
     'loc_x': [750, 1100],
     }
 BASKET = {
     'thresh': [np.array([0, 26, 81]), np.array([207, 255, 255])],
-    'area': [2500, 3300],
+    'area': [2000, 3500],
     'loc_x': [0, 750],
     }
 
@@ -34,7 +36,7 @@ HOME = [0, 65]
 
 # aim time for the shoot
 SHOOT_DELAY = 0.2
-INFER_DELAY = 1.4
+INFER_DELAY = 1.44
 
 # tick frequency (used for timing between frames to get velocities in px/sec)
 FREQUENCY = cv.getTickFrequency()
@@ -63,7 +65,6 @@ MAX_PIX = 470
 # higher number means more lag/slower speed, lower number means higher movement fidelity
 INCREMENTS = 20
 
-LOG_VIDEO = True
 BASE_LOG_DIRECTORY = "D:\\basketball_logs"
 LOG_DATA_FILENAME = "log.csv"
 
@@ -106,10 +107,11 @@ VID_FPS = 25.0
 def end():
     """ End the program """
     cam.release()
-    video_out.release()
+    if LOG_VIDEO:
+        video_out.release()
+        fd.close()
     cv.destroyAllWindows()
     ser.close()
-    fd.close()
     sys.exit()
 
 def write_servo(ser_obj, pin, val):
@@ -147,7 +149,7 @@ def pen(activate):
         pass
     sleep(0.001)
 
-cam = cv.VideoCapture(0)
+cam = cv.VideoCapture(CAMERA_NUMBER)
 
 cam.set(3, 1920)
 cam.set(4, 1080)
@@ -187,15 +189,16 @@ pred_loc = [0, 0]
 record = False
 video_out = None
 
-# create a unique log directory
-log_directory = os.path.join(BASE_LOG_DIRECTORY, str(int(time.time())))
-os.mkdir(log_directory)
+if LOG_VIDEO:
+    # create a unique log directory
+    log_directory = os.path.join(BASE_LOG_DIRECTORY, str(int(time.time())))
+    os.mkdir(log_directory)
 
-# create data log file
-fd = open(os.path.join(log_directory, LOG_DATA_FILENAME), 'w')
-for heading in LOG_VAR_HEADINGS:
-    fd.write(heading + ",")
-fd.write("\n")
+    # create data log file
+    fd = open(os.path.join(log_directory, LOG_DATA_FILENAME), 'w')
+    for heading in LOG_VAR_HEADINGS:
+        fd.write(heading + ",")
+    fd.write("\n")
 
 while(True):
     # quit if q is pressed
@@ -260,7 +263,7 @@ while(True):
 
     if len(poi_coords) != 2:
         cv.imshow('points', frame)
-        if record:
+        if record and LOG_VIDEO:
             video_out.write(original)
         # cv.imshow('contour', contours_frame)
         continue
@@ -296,11 +299,12 @@ while(True):
                 bounds[i][j] = np.average(bounds_ave[i][j])
 
     # detect if bounds have been reached
-    for i in range(len(bounds)):
-        if pred_loc[i] > bounds[i][0] and np.average(vel_ave[i]) > 5:
-            pred_loc[i] = int(2 * bounds[i][0] - pred_loc[i])
-        elif pred_loc[i] < bounds[i][1] and np.average(vel_ave[i]) > 5:
-            pred_loc[i] = int(2 * bounds[i][1] - pred_loc[i])
+    if np.average(vel_ave[1]) > 9:
+        for i in range(len(bounds)):
+            if pred_loc[i] > bounds[i][0] and np.average(vel_ave[i]) > 5:
+                pred_loc[i] = int(2 * bounds[i][0] - pred_loc[i])
+            elif pred_loc[i] < bounds[i][1] and np.average(vel_ave[i]) > 5:
+                pred_loc[i] = int(2 * bounds[i][1] - pred_loc[i])
 
     prev_tick = cv.getTickCount()
     prev_pos = basket_coord[:]
@@ -314,9 +318,7 @@ while(True):
 
     shot += 1
 
-    # print(str(np.std(vel_ave)) + " " + str(ball_coord[1]) + " " + str(pred_loc[1]))
-
-    if (np.average(vel_ave[1]) < 5 or (np.std(vel_ave[0]) < 30 and np.std(vel_ave[1]) < 50 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 20 and np.std(bounds_ave[0][1]) < 20 and np.std(bounds_ave[1][0]) < 20 and np.std(bounds_ave[1][1]) < 20)) and shot > 20:
+    if (np.average(vel_ave[1]) < 9 or (np.std(vel_ave[0]) < 50 and np.std(vel_ave[1]) < 130 and ball_coord[1]-5 < pred_loc[1] < ball_coord[1]+5 and np.std(bounds_ave[0][0]) < 30 and np.std(bounds_ave[0][1]) < 30 and np.std(bounds_ave[1][0]) < 30 and np.std(bounds_ave[1][1]) < 30)) and shot > 20:
         print("shoot {0}, {1}".format(ball_coord, pred_loc))
 
         m = (pred_loc[1] - ball_coord[1]) / float(pred_loc[0] - ball_coord[0])
@@ -338,23 +340,24 @@ while(True):
         pen(0)
         send_move(HOME, absolute=True)
 
-        # record logs
-        current_time = str(int(time.time()))
-        if video_out:
-            video_out.release()
-        video_out = cv.VideoWriter(os.path.join(log_directory, current_time + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
-        record = True
+        if LOG_VIDEO:
+            # record logs
+            current_time = str(int(time.time()))
+            if video_out:
+                video_out.release()
+            video_out = cv.VideoWriter(os.path.join(log_directory, current_time + VID_EXTENSION), VIDEO_ENCODER, VID_FPS, DIMENSIONS)
+            record = True
 
-        current_vars = vars()
-        for log_var in LOG_VARS:
-            fd.write(str(log_var(current_vars)) + ",")
-        fd.write("\n")
+            current_vars = vars()
+            for log_var in LOG_VARS:
+                fd.write(str(log_var(current_vars)) + ",")
+            fd.write("\n")
 
         shot = 0
 
     # show images
     # cv.imshow('ball', ball_bin)
-    # cv.imshow('basket', basket_bin)
+    cv.imshow('basket', basket_bin)
     # cv.imshow('frame', frame)
     cv.imshow('points', points_frame)
     # cv.imshow('contour', contours_frame)
